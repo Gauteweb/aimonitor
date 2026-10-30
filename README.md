@@ -1,4 +1,13 @@
-# AI Monitor for Claude
+# AI Monitor
+
+This repo contains various small menu bar utilities for monitoring your AI usage. Currently supporting the following AI vendors:
+
+- Claude
+- Mistral
+
+Currently there are separate utilities for each vendor, so make sure you install the utility for your AI vendor.
+
+## AI Monitor for Claude
 
 A small macOS menu bar app that shows how much of your Claude usage limits you have used.
 
