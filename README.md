@@ -3,7 +3,7 @@
 A small macOS menu bar app that shows how much of your Claude usage limits you have used.
 
 <p align="center">
-  <img src="aimonitor_example.png" width="600" alt="AI Monitor for Claude in the macOS menu bar, with the menu open showing license, organization, session and weekly usage, and Claude memory usage">
+  <img src="aimonitor_example.png" width="600" alt="AI Monitor for Claude in the macOS menu bar, with the menu open showing license, organization, session and weekly usage, memory usage and a CPU usage graph">
 </p>
 
 The first number is the **current session** (the 5-hour window) and the second is the **weekly limit (all models)**, the same figures as `/usage` in Claude Code and claude.ai/settings/usage. A number turns **yellow at 50%** and **red at 75%**.
