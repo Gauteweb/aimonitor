@@ -11,10 +11,23 @@ EXEC="AIMonitorForClaude"
 BUNDLE_ID="net.gauteweb.aimonitor"
 APP="build/$NAME.app"
 
+ICON_SOURCE="ai-monitor-icon-512.png"
+
 rm -rf build
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 swiftc -O -swift-version 5 -o "$APP/Contents/MacOS/$EXEC" Sources/main.swift
+
+# App icon: scale the 512 px source to every size macOS uses and pack it as .icns.
+ICONSET="build/AppIcon.iconset"
+mkdir -p "$ICONSET"
+for size in 16 32 128 256 512; do
+    sips -z $size $size "$ICON_SOURCE" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+    if (( size < 512 )); then
+        sips -z $((size * 2)) $((size * 2)) "$ICON_SOURCE" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+    fi
+done
+iconutil -c icns -o "$APP/Contents/Resources/AppIcon.icns" "$ICONSET"
 
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -26,6 +39,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <key>CFBundleName</key><string>$NAME</string>
     <key>CFBundleDisplayName</key><string>$NAME</string>
     <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
     <key>CFBundleVersion</key><string>$VERSION</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>

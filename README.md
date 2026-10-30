@@ -123,10 +123,11 @@ defaults delete net.gauteweb.aimonitor
 ## Project structure
 
 ```
-Sources/main.swift   The whole app (AppKit, no dependencies)
-build.sh             Builds, signs, installs and launches the app (--build-only: just builds)
-LICENSE              MIT license
-.github/workflows/   Release workflow
+Sources/main.swift       The whole app (AppKit, no dependencies)
+build.sh                 Builds, signs, installs and launches the app (--build-only: just builds)
+ai-monitor-icon-512.png  App icon (build.sh turns it into AppIcon.icns)
+LICENSE                  MIT license
+.github/workflows/       Release workflow
 ```
 
 ## Releasing a new version
