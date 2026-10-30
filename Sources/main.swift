@@ -225,17 +225,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let otherVSCodeItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let otherMonitorItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let statusLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let nextItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let loginItem = NSMenuItem(title: tr("Start ved innlogging", "Launch at login"), action: #selector(toggleLogin), keyEquivalent: "")
 
     private var last: UsageResponse?
     private var lastUpdated: Date?
     private var timer: Timer?
     private var isFetching = false
-    /// No requests are sent before this time (set after a 429).
-    private var blockedUntil: Date?
-    private var backoff: TimeInterval = 0
-    private let refreshInterval: TimeInterval = 300
-    private let maxBackoff: TimeInterval = 3600
+
+    // Rate limiting. The usage endpoint's limit is unknown and shared with Claude Code,
+    // so requests are never sent more often than `minInterval`. Each 429 doubles the
+    // interval (up to `maxInterval`); after `successesBeforeDecrease` successful
+    // requests in a row it is halved again, but never below `minInterval`.
+    // Both the interval and the time of the next allowed request survive restarts.
+    private let minInterval: TimeInterval = 300
+    private let maxInterval: TimeInterval = 3600
+    private let successesBeforeDecrease = 6
+    private var interval: TimeInterval = 300
+    private var successStreak = 0
+    /// No request is sent before this time.
+    private var nextAllowedAt = Date.distantPast
+    private let intervalKey = "refreshInterval"
+    private let nextAllowedKey = "nextRequestTime"
     private let cacheKey = "lastUsageJSON"
     private let cacheTimeKey = "lastUsageTime"
 
@@ -248,7 +259,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         for item in [planItem, orgItem, sessionItem, sessionResetItem, weeklyItem, weeklyResetItem,
                      memoryItem, memoryDesktopItem, memoryCodeItem,
-                     otherHeaderItem, otherVSCodeItem, otherMonitorItem, statusLine] {
+                     otherHeaderItem, otherVSCodeItem, otherMonitorItem, statusLine, nextItem] {
             item.isEnabled = false
         }
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
@@ -285,6 +296,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(otherMonitorItem)
         menu.addItem(.separator())
         menu.addItem(statusLine)
+        menu.addItem(nextItem)
         menu.addItem(NSMenuItem(title: tr("Oppdater nå", "Refresh now"), action: #selector(refreshNow), keyEquivalent: "r"))
         menu.addItem(NSMenuItem(title: tr("Åpne claude.ai/settings/usage", "Open claude.ai/settings/usage"), action: #selector(openUsagePage), keyEquivalent: ""))
         loginItem.target = self
@@ -297,7 +309,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         statusItem.menu = menu
 
-        // Show the last known values right away, and skip the first request if they are recent.
+        // Show the last known values right away. refresh() skips the request if the
+        // previous one was less than `interval` ago.
         let defaults = UserDefaults.standard
         if let data = defaults.data(forKey: cacheKey),
            let usage = try? JSONDecoder().decode(UsageResponse.self, from: data) {
@@ -305,11 +318,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             lastUpdated = defaults.object(forKey: cacheTimeKey) as? Date
             render(error: nil)
         }
-        if let t = lastUpdated, Date().timeIntervalSince(t) < refreshInterval {
-            scheduleNext(after: refreshInterval - Date().timeIntervalSince(t))
-        } else {
-            refresh()
-        }
+        let saved = defaults.double(forKey: intervalKey)
+        interval = min(max(saved, minInterval), maxInterval)
+        nextAllowedAt = defaults.object(forKey: nextAllowedKey) as? Date ?? .distantPast
+        refresh()
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
     }
@@ -361,8 +373,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updatePlan()
         refreshOrganization()
         applyColors()
-        // Refresh in the background only if the data is clearly old.
-        if let t = lastUpdated, Date().timeIntervalSince(t) < 120 { return }
         refresh()
     }
 
@@ -407,10 +417,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         otherMonitorItem.title = "   AI Monitor for Claude: " + f.string(fromByteCount: Int64(usage.monitor.bytes))
     }
 
-    @objc private func didWake() {
-        if let t = lastUpdated, Date().timeIntervalSince(t) < refreshInterval { return }
-        refresh()
-    }
+    @objc private func didWake() { refresh() }
 
     private func scheduleNext(after delay: TimeInterval) {
         timer?.invalidate()
@@ -439,13 +446,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
     }
 
+    /// Fetches usage unless the previous request was too recent; in that case it
+    /// just makes sure a request is scheduled for when it is allowed.
     private func refresh() {
         if isFetching { return }
-        if let until = blockedUntil, Date() < until {
+        let now = Date()
+        if now < nextAllowedAt {
+            scheduleNext(after: nextAllowedAt.timeIntervalSince(now))
             updateStatusLine(error: nil)
             return
         }
         isFetching = true
+        // Reserve the slot before sending, so nothing else can fire meanwhile.
+        setNextAllowed(now.addingTimeInterval(interval))
         Task {
             defer { self.isFetching = false }
             do {
@@ -454,26 +467,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.last = usage
                 self.lastUpdated = Date()
                 self.lastError = nil
-                self.blockedUntil = nil
-                self.backoff = 0
                 UserDefaults.standard.set(data, forKey: self.cacheKey)
                 UserDefaults.standard.set(self.lastUpdated, forKey: self.cacheTimeKey)
+                self.successStreak += 1
+                if self.successStreak >= self.successesBeforeDecrease && self.interval > self.minInterval {
+                    self.setInterval(self.interval / 2)
+                    self.successStreak = 0
+                }
                 self.render(error: nil)
-                self.scheduleNext(after: self.refreshInterval)
             } catch FetchError.rateLimited(let retryAfter) {
-                // Back off: 5, 10, 20, 40, 60 min, or longer if the server asks for it.
-                self.backoff = min(max(self.backoff * 2, self.refreshInterval), self.maxBackoff)
-                let wait = max(self.backoff, retryAfter ?? 0)
-                self.blockedUntil = Date().addingTimeInterval(wait)
+                // 5 → 10 → 20 → 40 → 60 min, or longer if the server asks for it.
+                self.successStreak = 0
+                self.setInterval(self.interval * 2)
+                self.setNextAllowed(now.addingTimeInterval(max(self.interval, retryAfter ?? 0)))
                 self.lastError = FetchError.rateLimited(retryAfter: retryAfter)
                 self.render(error: self.lastError)
-                self.scheduleNext(after: wait)
             } catch {
                 self.lastError = error
                 self.render(error: error)
-                self.scheduleNext(after: self.refreshInterval)
             }
+            self.scheduleNext(after: self.nextAllowedAt.timeIntervalSinceNow)
         }
+    }
+
+    private func setInterval(_ value: TimeInterval) {
+        interval = min(max(value, minInterval), maxInterval)
+        UserDefaults.standard.set(interval, forKey: intervalKey)
+    }
+
+    private func setNextAllowed(_ date: Date) {
+        nextAllowedAt = date
+        UserDefaults.standard.set(date, forKey: nextAllowedKey)
     }
 
     private func render(error: Error?) {
@@ -509,10 +533,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 statusLine.title = tr("Token utløpt – åpne Claude Code for å fornye",
                                       "Token expired – open Claude Code to renew it")
             case FetchError.rateLimited:
-                let f = DateFormatter()
-                f.locale = appLocale
-                f.dateFormat = "HH:mm"
-                let at = blockedUntil.map { f.string(from: $0) } ?? "–"
+                let at = clockTime(nextAllowedAt)
                 statusLine.title = tr("For mange forespørsler (HTTP 429) – prøver igjen kl. \(at)",
                                       "Too many requests (HTTP 429) – retrying at \(at)")
             case FetchError.http(let c):
@@ -527,7 +548,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             statusLine.title = tr("Henter…", "Loading…")
         }
+        let minutes = Int(interval / 60)
+        let at = clockTime(max(nextAllowedAt, Date()))
+        nextItem.title = tr("Neste oppdatering kl. \(at) · hvert \(minutes). min",
+                            "Next update at \(at) · every \(minutes) min")
         applyColors()
+    }
+
+    private func clockTime(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = appLocale
+        f.dateFormat = "HH:mm"
+        return f.string(from: date)
     }
 
     private func titleString(session: Double?, weekly: Double?, stale: Bool) -> NSAttributedString {
