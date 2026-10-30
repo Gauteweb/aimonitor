@@ -1,0 +1,97 @@
+# AI Monitor for Claude
+
+A small macOS menu bar app that shows how much of your Claude usage limits you have used.
+
+```
+✳ 12% · 48%
+```
+
+The first number is the **current session** (the 5-hour window) and the second is the **weekly limit (all models)**, the same figures as `/usage` in Claude Code and claude.ai/settings/usage. A number turns **yellow at 50%** and **red at 75%**.
+
+> **Unofficial.** This project is not made by, affiliated with or endorsed by Anthropic. It relies on undocumented endpoints that may change or stop working at any time.
+
+## Features
+
+Click the icon to open the menu:
+
+- **App name and version**
+- **License** – your plan, e.g. `Team · Max 5x`
+- **Organization** – the name of your Claude organization
+- **Current session** and **Weekly limit (all models)**, with the time each one resets
+- **Claude memory usage** – total memory used by the Claude desktop app (including its `Claude Helper` processes) and by Claude Code CLI sessions, measured the same way as the *Memory* column in Activity Monitor
+- **Status line** – when the figures were last updated, or what went wrong
+- **Refresh now** (⌘R), **Open claude.ai/settings/usage**, **Launch at login** and **Quit** (⌘Q)
+
+The menu is in Norwegian if Norwegian is the first preferred language in macOS, and in English otherwise.
+
+## Requirements
+
+- macOS 13 (Ventura) or later
+- [Claude Code](https://claude.com/claude-code) installed and logged in with a Claude account (Pro, Max, Team or Enterprise). The app reuses Claude Code's login, so there is no separate sign-in or API key.
+- Xcode Command Line Tools to build (`xcode-select --install`)
+
+## Build and install
+
+```sh
+./build.sh
+```
+
+The script compiles `Sources/main.swift`, creates `AI Monitor for Claude.app`, signs it ad hoc, installs it in `~/Applications`, stops any running copy and starts the new one.
+
+To start it automatically, choose **Launch at login** in the menu.
+
+## How it works
+
+| What | Source |
+|---|---|
+| Usage percentages | `GET https://api.anthropic.com/api/oauth/usage` (`five_hour` and `seven_day`) |
+| Organization name | `GET https://api.anthropic.com/api/oauth/profile` |
+| License | `subscriptionType` and `rateLimitTier` in Claude Code's keychain item |
+| Memory | `proc_pid_rusage` (physical footprint) for processes in `Claude.app` and Claude Code processes |
+
+The access token is read from the `Claude Code-credentials` item in the login keychain via `/usr/bin/security`. It is only sent to `api.anthropic.com`, and never stored by this app.
+
+### Refresh and rate limits
+
+The usage endpoint is rate limited and shared with Claude Code itself, so the app is deliberately cautious:
+
+- Usage is refreshed every **5 minutes**. Opening the menu only triggers a refresh if the data is more than 2 minutes old, and waking the Mac only if it is more than 5 minutes old.
+- On **HTTP 429** the app backs off for 5, 10, 20, 40 and at most 60 minutes. It keeps showing the last figures with a ⚠︎ in the meantime.
+- The last response is cached, so restarts and rebuilds show figures immediately without a new request.
+- The organization name is fetched at most once a day.
+
+## Troubleshooting
+
+| Message | Meaning |
+|---|---|
+| `waiting` in the menu bar | No figures yet and the last attempt failed. See the status line in the menu. |
+| ⚠︎ after the figures | The figures are from an earlier successful refresh. The latest attempt failed. |
+| Claude Code login not found | Run `claude` and log in. |
+| Token expired – open Claude Code to renew it | The app does not renew the login itself, since that could log you out of Claude Code. Using Claude Code renews it. |
+| Too many requests (HTTP 429) | Rate limited. The app retries automatically at the time shown. |
+
+## Uninstall
+
+```sh
+pkill -x AIMonitorForClaude
+rm -rf ~/Applications/"AI Monitor for Claude.app"
+defaults delete local.claudestatus
+```
+
+If **Launch at login** was enabled, turn it off in the menu first.
+
+## Project structure
+
+```
+Sources/main.swift   The whole app (AppKit, no dependencies)
+build.sh             Builds, signs, installs and launches the app
+LICENSE              MIT license
+```
+
+To change the version number, edit `CFBundleShortVersionString` in `build.sh`.
+
+## License
+
+[MIT](LICENSE) © 2026 Gaute Holmin
+
+Claude is a trademark of Anthropic. This project is an independent, unofficial tool.
