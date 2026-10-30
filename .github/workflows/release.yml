@@ -1,0 +1,99 @@
+# Creates a GitHub release and updates the Homebrew formula in
+# Gauteweb/homebrew-tap when a version tag (e.g. v1.0) is pushed.
+#
+# Requires the secret HOMEBREW_TAP_DEPLOY_KEY: the private half of a deploy key
+# with write access to Gauteweb/homebrew-tap.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release, e.g. v0.9"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Check that VERSION in build.sh matches the tag
+        run: |
+          VERSION=$(sed -n 's/^VERSION="\(.*\)"$/\1/p' build.sh)
+          if [ "v$VERSION" != "$TAG" ]; then
+            echo "::error::build.sh has VERSION=\"$VERSION\", but the tag is $TAG"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: ./build.sh --build-only
+
+      - name: Create GitHub release
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists"
+          else
+            gh release create "$TAG" --verify-tag --generate-notes \
+              --title "AI Monitor for Claude $VERSION"
+          fi
+
+      - name: Compute checksum of the source archive
+        run: |
+          URL="https://github.com/${{ github.repository }}/archive/refs/tags/$TAG.tar.gz"
+          SHA=$(curl -fsSL "$URL" | shasum -a 256 | cut -d' ' -f1)
+          echo "URL=$URL" >> "$GITHUB_ENV"
+          echo "SHA=$SHA" >> "$GITHUB_ENV"
+          echo "$URL"
+          echo "sha256 $SHA"
+
+      - name: Check out the Homebrew tap
+        uses: actions/checkout@v5
+        with:
+          repository: Gauteweb/homebrew-tap
+          ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          path: tap
+
+      - name: Update the formula
+        working-directory: tap
+        run: |
+          sed -i '' -E \
+            -e "s|^  url \".*\"|  url \"$URL\"|" \
+            -e "s|^  sha256 \".*\"|  sha256 \"$SHA\"|" \
+            Formula/aimonitor.rb
+          git diff
+          if git diff --quiet; then
+            echo "CHANGED=false" >> "$GITHUB_ENV"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -am "aimonitor $VERSION"
+            echo "CHANGED=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install and test the updated formula
+        run: |
+          brew tap gauteweb/tap "$PWD/tap"
+          brew install --build-from-source gauteweb/tap/aimonitor
+          brew test gauteweb/tap/aimonitor
+          brew audit --strict gauteweb/tap/aimonitor
+
+      - name: Push the formula update
+        if: env.CHANGED == 'true'
+        working-directory: tap
+        run: git push

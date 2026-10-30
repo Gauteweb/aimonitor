@@ -123,9 +123,21 @@ defaults delete net.gauteweb.aimonitor
 Sources/main.swift   The whole app (AppKit, no dependencies)
 build.sh             Builds, signs, installs and launches the app (--build-only: just builds)
 LICENSE              MIT license
+.github/workflows/   Release workflow
 ```
 
-To change the version number, edit `VERSION` in `build.sh`.
+## Releasing a new version
+
+1. Set `VERSION` in `build.sh`, for example `VERSION="1.0"`, and commit.
+2. Tag and push:
+   ```sh
+   git tag v1.0
+   git push origin main v1.0
+   ```
+
+The [Release workflow](.github/workflows/release.yml) then checks that the tag matches `VERSION`, builds the app, creates a GitHub release, and updates `url` and `sha256` in the formula in [Gauteweb/homebrew-tap](https://github.com/Gauteweb/homebrew-tap). The formula is installed and tested before the update is pushed. A release for an existing tag can also be started by hand under *Actions → Release → Run workflow*.
+
+The workflow needs the repository secret `HOMEBREW_TAP_DEPLOY_KEY`: the private half of a deploy key with write access to `Gauteweb/homebrew-tap`.
 
 ## License
 
