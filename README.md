@@ -132,7 +132,13 @@ defaults delete net.gauteweb.aimonitor
 
 ## AI Monitor for Mistral Vibe
 
-The repository also contains **AI Monitor for Mistral Vibe**, the same kind of menu bar app for [Mistral Vibe](https://mistral.ai/products/vibe). Install it with Homebrew:
+The repository also contains **AI Monitor for Mistral Vibe**, the same kind of menu bar app for [Mistral Vibe](https://mistral.ai/products/vibe).
+
+<p align="center">
+  <img src="vibe_screenshot.png" width="600" alt="AI Monitor for Mistral Vibe in the macOS menu bar, with the menu open showing license, Vibe Code and API usage included in the plan, a graph of API requests for the last 30 days, memory usage and a CPU usage graph">
+</p>
+
+Install it with Homebrew:
 
 ```sh
 brew install gauteweb/tap/aimonitor-mistral-vibe
