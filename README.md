@@ -68,7 +68,7 @@ cd aimonitor
 ./build.sh
 ```
 
-The script compiles `Sources/main.swift`, creates `AI Monitor for Claude.app`, signs it ad hoc, installs it in `~/Applications`, stops any running copy and starts the new one. With `./build.sh --build-only` it only builds the app in `build/`.
+The script compiles `Sources/Claude/` and `Sources/Shared/`, creates `AI Monitor for Claude.app`, signs it ad hoc, installs it in `~/Applications`, stops any running copy and starts the new one. With `./build.sh --build-only` it only builds the app in `build/`.
 
 To start it automatically, choose **Launch at login** in the menu.
 
@@ -121,11 +121,51 @@ rm -rf ~/Applications/"AI Monitor for Claude.app"
 defaults delete net.gauteweb.aimonitor
 ```
 
+## AI Monitor for Mistral Vibe
+
+The repository also contains **AI Monitor for Mistral Vibe**, the same kind of menu bar app for [Mistral Vibe](https://mistral.ai/products/vibe). It is built from source and is not available through Homebrew yet:
+
+```sh
+./build.sh vibe
+```
+
+The menu bar shows how much of the **included Vibe Code usage** this month you have used, with the same colours as the Claude app. The menu shows:
+
+- **License** – your Mistral plan, e.g. `Team`
+- **Vibe Code (included in plan)** and **API (included in plan)** – percentage and amount, e.g. `$10.07 of $600`, and the day both reset (the first day of each month)
+- **API requests, last 30 days** – a bar chart per day, split by usage type (Vibe Work, Vibe Code, Connectors, Completion, …) with the total for each, like the chart at admin.mistral.ai/organization/usage
+- **Vibe CLI memory usage**, **other relevant processes** and a **CPU graph** for Vibe CLI and Visual Studio Code, as in the Claude app
+- **Refresh now**, **Open admin.mistral.ai/subscription**, **Log in to Mistral…**, **Log out of Mistral**, **Launch at login** and **Quit**
+
+> **Unofficial.** Not made by, affiliated with or endorsed by Mistral AI.
+
+### How it works
+
+Mistral has no API for the included allowances. Vibe's own API key cannot read them either. The app therefore reads them from the subscription page at [admin.mistral.ai/subscription](https://admin.mistral.ai/subscription), which is only shown to organization admins:
+
+- Choose **Log in to Mistral…** and log in once in the window that opens. The window closes by itself when the figures have been read.
+- The login is kept in the app's own web view storage (not in your browser). **Log out of Mistral** removes it.
+- The page is loaded in a hidden web view every **10 minutes**, and the amounts are read from the text on the page. If Mistral changes the page, this may stop working.
+- The API requests come from `/api/local-trpc/usage.timeseries`, the internal endpoint the usage page uses. It is called from inside the logged-in page, so it uses the same login. If only this part fails, the menu keeps showing the last graph.
+- If the figures can't be read (not logged in, not an admin, or the page has changed), the menu bar shows only the icon and the menu shows the reason. Plan, memory and CPU still work. The plan then comes from Vibe's own cache, `~/.vibe/whoami_cache.json`.
+- Vibe CLI is recognised by its process title `Vibe CLI` (it runs as `python3.13`).
+
+To uninstall it, turn off **Launch at login** in the menu, then:
+
+```sh
+pkill -x AIMonitorForMistralVibe
+rm -rf ~/Applications/"AI Monitor for Mistral Vibe.app"
+defaults delete net.gauteweb.aimonitor.vibe
+rm -rf ~/Library/WebKit/net.gauteweb.aimonitor.vibe   # the Mistral login
+```
+
 ## Project structure
 
 ```
-Sources/main.swift       The whole app (AppKit, no dependencies)
-build.sh                 Builds, signs, installs and launches the app (--build-only: just builds)
+Sources/Claude/          AI Monitor for Claude (AppKit, no dependencies)
+Sources/Vibe/            AI Monitor for Mistral Vibe (AppKit and WebKit)
+Sources/Shared/          Code used by both: processes, CPU graph, menu, icon, language
+build.sh                 Builds, signs, installs and launches an app: ./build.sh [claude|vibe] [--build-only]
 ai-monitor-icon-512.png  App icon (build.sh turns it into AppIcon.icns)
 LICENSE                  MIT license
 .github/workflows/       Release workflow
@@ -144,8 +184,18 @@ The [Release workflow](.github/workflows/release.yml) then checks that the tag m
 
 The workflow needs the repository secret `HOMEBREW_TAP_DEPLOY_KEY`: the private half of a deploy key with write access to `Gauteweb/homebrew-tap`.
 
+AI Monitor for Mistral Vibe is released by hand, with tags of the form `mistral-vibe-v1.0` so they don't start the workflow above:
+
+1. Set `VIBE_VERSION` in `build.sh` and commit.
+2. Tag, push and create the release:
+   ```sh
+   git tag mistral-vibe-v1.0
+   git push origin main mistral-vibe-v1.0
+   gh release create mistral-vibe-v1.0 --verify-tag --title "AI Monitor for Mistral Vibe 1.0" --notes "…"
+   ```
+
 ## License
 
 [MIT](LICENSE) © 2026 Gaute Holmin
 
-Claude is a trademark of Anthropic. This project is an independent, unofficial tool.
+Claude is a trademark of Anthropic. Mistral and Mistral Vibe are trademarks of Mistral AI. This project is an independent, unofficial tool.
