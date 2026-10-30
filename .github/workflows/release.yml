@@ -1,5 +1,7 @@
 # Creates a GitHub release and updates the Homebrew formula in
-# Gauteweb/homebrew-tap when a version tag (e.g. v1.0) is pushed.
+# Gauteweb/homebrew-tap when a version tag is pushed:
+#   v1.0               AI Monitor for Claude         (Formula/aimonitor.rb)
+#   mistral-vibe-v1.0  AI Monitor for Mistral Vibe   (Formula/aimonitor-mistral-vibe.rb)
 #
 # Requires the secret HOMEBREW_TAP_DEPLOY_KEY: the private half of a deploy key
 # with write access to Gauteweb/homebrew-tap.
@@ -8,11 +10,11 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*", "mistral-vibe-v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to release, e.g. v0.9"
+        description: "Existing tag to release, e.g. v0.9 or mistral-vibe-v1.0"
         required: true
 
 permissions:
@@ -32,25 +34,53 @@ jobs:
         with:
           ref: ${{ env.TAG }}
 
-      - name: Check that VERSION in build.sh matches the tag
+      - name: Choose the app from the tag
         run: |
-          VERSION=$(sed -n 's/^VERSION="\(.*\)"$/\1/p' build.sh)
-          if [ "v$VERSION" != "$TAG" ]; then
-            echo "::error::build.sh has VERSION=\"$VERSION\", but the tag is $TAG"
+          case "$TAG" in
+            mistral-vibe-v*)
+              {
+                echo "PREFIX=mistral-vibe-v"
+                echo "VERSION_VAR=VIBE_VERSION"
+                echo "BUILD_ARGS=vibe --build-only"
+                echo "APP_NAME=AI Monitor for Mistral Vibe"
+                echo "FORMULA=aimonitor-mistral-vibe"
+                # Keep AI Monitor for Claude as the repository's latest release.
+                echo "LATEST=false"
+              } >> "$GITHUB_ENV" ;;
+            v*)
+              {
+                echo "PREFIX=v"
+                echo "VERSION_VAR=VERSION"
+                # Tags before the Mistral Vibe app have a build.sh without the app argument.
+                echo "BUILD_ARGS=--build-only"
+                echo "APP_NAME=AI Monitor for Claude"
+                echo "FORMULA=aimonitor"
+                echo "LATEST=true"
+              } >> "$GITHUB_ENV" ;;
+            *)
+              echo "::error::Unknown tag $TAG"
+              exit 1 ;;
+          esac
+
+      - name: Check that the version in build.sh matches the tag
+        run: |
+          VERSION=$(sed -n "s/^$VERSION_VAR=\"\(.*\)\"$/\1/p" build.sh)
+          if [ "$PREFIX$VERSION" != "$TAG" ]; then
+            echo "::error::build.sh has $VERSION_VAR=\"$VERSION\", but the tag is $TAG"
             exit 1
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Build
-        run: ./build.sh --build-only
+        run: ./build.sh $BUILD_ARGS
 
       - name: Create GitHub release
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists"
           else
-            gh release create "$TAG" --verify-tag --generate-notes \
-              --title "AI Monitor for Claude $VERSION"
+            gh release create "$TAG" --verify-tag --generate-notes --latest="$LATEST" \
+              --title "$APP_NAME $VERSION"
           fi
 
       - name: Compute checksum of the source archive
@@ -75,23 +105,23 @@ jobs:
           sed -i '' -E \
             -e "s|^  url \".*\"|  url \"$URL\"|" \
             -e "s|^  sha256 \".*\"|  sha256 \"$SHA\"|" \
-            Formula/aimonitor.rb
+            "Formula/$FORMULA.rb"
           git diff
           if git diff --quiet; then
             echo "CHANGED=false" >> "$GITHUB_ENV"
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit -am "aimonitor $VERSION"
+            git commit -am "$FORMULA $VERSION"
             echo "CHANGED=true" >> "$GITHUB_ENV"
           fi
 
       - name: Install and test the updated formula
         run: |
           brew tap gauteweb/tap "$PWD/tap"
-          brew install --build-from-source gauteweb/tap/aimonitor
-          brew test gauteweb/tap/aimonitor
-          brew audit --strict gauteweb/tap/aimonitor
+          brew install --build-from-source "gauteweb/tap/$FORMULA"
+          brew test "gauteweb/tap/$FORMULA"
+          brew audit --strict "gauteweb/tap/$FORMULA"
 
       - name: Push the formula update
         if: env.CHANGED == 'true'

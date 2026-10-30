@@ -123,10 +123,18 @@ defaults delete net.gauteweb.aimonitor
 
 ## AI Monitor for Mistral Vibe
 
-The repository also contains **AI Monitor for Mistral Vibe**, the same kind of menu bar app for [Mistral Vibe](https://mistral.ai/products/vibe). It is built from source and is not available through Homebrew yet:
+The repository also contains **AI Monitor for Mistral Vibe**, the same kind of menu bar app for [Mistral Vibe](https://mistral.ai/products/vibe). Install it with Homebrew:
 
 ```sh
-./build.sh vibe
+brew install gauteweb/tap/aimonitor-mistral-vibe
+open "$(brew --prefix aimonitor-mistral-vibe)/AI Monitor for Mistral Vibe.app"
+```
+
+Or build it from source with `./build.sh vibe`. The [limitations of the Homebrew install](#limitations-of-the-homebrew-install) apply to it as well. To upgrade:
+
+```sh
+brew upgrade aimonitor-mistral-vibe
+pkill -x AIMonitorForMistralVibe; open "$(brew --prefix aimonitor-mistral-vibe)/AI Monitor for Mistral Vibe.app"
 ```
 
 The menu bar shows how much of the **included Vibe Code usage** this month you have used, with the same colours as the Claude app. The menu shows:
@@ -154,7 +162,8 @@ To uninstall it, turn off **Launch at login** in the menu, then:
 
 ```sh
 pkill -x AIMonitorForMistralVibe
-rm -rf ~/Applications/"AI Monitor for Mistral Vibe.app"
+brew uninstall aimonitor-mistral-vibe                     # if installed with Homebrew
+rm -rf ~/Applications/"AI Monitor for Mistral Vibe.app"   # if built from source
 defaults delete net.gauteweb.aimonitor.vibe
 rm -rf ~/Library/WebKit/net.gauteweb.aimonitor.vibe   # the Mistral login
 ```
@@ -184,15 +193,7 @@ The [Release workflow](.github/workflows/release.yml) then checks that the tag m
 
 The workflow needs the repository secret `HOMEBREW_TAP_DEPLOY_KEY`: the private half of a deploy key with write access to `Gauteweb/homebrew-tap`.
 
-AI Monitor for Mistral Vibe is released by hand, with tags of the form `mistral-vibe-v1.0` so they don't start the workflow above:
-
-1. Set `VIBE_VERSION` in `build.sh` and commit.
-2. Tag, push and create the release:
-   ```sh
-   git tag mistral-vibe-v1.0
-   git push origin main mistral-vibe-v1.0
-   gh release create mistral-vibe-v1.0 --verify-tag --title "AI Monitor for Mistral Vibe 1.0" --notes "…"
-   ```
+AI Monitor for Mistral Vibe is released the same way, with `VIBE_VERSION` in `build.sh` and tags of the form `mistral-vibe-v1.0`. The workflow then updates `Formula/aimonitor-mistral-vibe.rb` instead, and leaves AI Monitor for Claude as the repository's latest release.
 
 ## License
 
