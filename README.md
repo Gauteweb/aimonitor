@@ -19,6 +19,7 @@ Click the icon to open the menu:
 - **Organization** – the name of your Claude organization
 - **Current session** and **Weekly limit (all models)**, with the time each one resets
 - **Claude memory usage** – total memory used by the Claude desktop app (including its `Claude Helper` processes) and by Claude Code CLI sessions, measured the same way as the *Memory* column in Activity Monitor
+- **Other relevant processes** – memory used by Visual Studio Code (including its `Code Helper` processes) and by AI Monitor for Claude itself
 - **Status line** – when the figures were last updated, or what went wrong
 - **Refresh now** (⌘R), **Open claude.ai/settings/usage**, **Launch at login** and **Quit** (⌘Q)
 

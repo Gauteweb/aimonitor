@@ -152,10 +152,18 @@ struct MemoryGroup {
     var bytes: UInt64 = 0
 }
 
+struct MemoryUsage {
+    var desktop = MemoryGroup()   // Claude desktop app and its helpers
+    var code = MemoryGroup()      // Claude Code CLI sessions
+    var vscode = MemoryGroup()    // Visual Studio Code and its helpers
+    var monitor = MemoryGroup()   // this app
+}
+
 /// Sums the memory footprint (same figure as Activity Monitor's "Memory" column)
-/// of the Claude desktop app with its helpers, and of Claude Code CLI processes.
-func claudeMemoryUsage() -> (desktop: MemoryGroup, code: MemoryGroup) {
-    var desktop = MemoryGroup(), code = MemoryGroup()
+/// of Claude processes and of other relevant processes.
+func memoryUsage() -> MemoryUsage {
+    var usage = MemoryUsage()
+    let ownPid = getpid()
     let capacity = Int(proc_listallpids(nil, 0)) + 64
     var pids = [pid_t](repeating: 0, count: capacity)
     let n = Int(proc_listallpids(&pids, Int32(capacity * MemoryLayout<pid_t>.size)))
@@ -168,9 +176,18 @@ func claudeMemoryUsage() -> (desktop: MemoryGroup, code: MemoryGroup) {
         // but the process name is "claude" since it is started via a symlink.
         var nameBuf = [CChar](repeating: 0, count: 256)
         proc_name(pid, &nameBuf, UInt32(nameBuf.count))
-        let isDesktop = path.contains("/Claude.app/")
-        let isCode = String(cString: nameBuf) == "claude" || path.contains("/claude/versions/")
-        guard isDesktop || isCode else { continue }
+        let group: WritableKeyPath<MemoryUsage, MemoryGroup>
+        if String(cString: nameBuf) == "claude" || path.contains("/claude/versions/") {
+            group = \.code
+        } else if path.contains("/Claude.app/") {
+            group = \.desktop
+        } else if path.contains("/Visual Studio Code.app/") {
+            group = \.vscode
+        } else if pid == ownPid {
+            group = \.monitor
+        } else {
+            continue
+        }
 
         var info = rusage_info_v4()
         let ok = withUnsafeMutablePointer(to: &info) {
@@ -179,15 +196,10 @@ func claudeMemoryUsage() -> (desktop: MemoryGroup, code: MemoryGroup) {
             }
         }
         guard ok else { continue }
-        if isDesktop {
-            desktop.count += 1
-            desktop.bytes += info.ri_phys_footprint
-        } else {
-            code.count += 1
-            code.bytes += info.ri_phys_footprint
-        }
+        usage[keyPath: group].count += 1
+        usage[keyPath: group].bytes += info.ri_phys_footprint
     }
-    return (desktop, code)
+    return usage
 }
 
 // MARK: - App
@@ -209,6 +221,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let memoryItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let memoryDesktopItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let memoryCodeItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let otherHeaderItem = NSMenuItem(title: tr("Andre relevante prosesser", "Other relevant processes"), action: nil, keyEquivalent: "")
+    private let otherVSCodeItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let otherMonitorItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let statusLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let loginItem = NSMenuItem(title: tr("Start ved innlogging", "Launch at login"), action: #selector(toggleLogin), keyEquivalent: "")
 
@@ -232,7 +247,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         for item in [planItem, orgItem, sessionItem, sessionResetItem, weeklyItem, weeklyResetItem,
-                     memoryItem, memoryDesktopItem, memoryCodeItem, statusLine] {
+                     memoryItem, memoryDesktopItem, memoryCodeItem,
+                     otherHeaderItem, otherVSCodeItem, otherMonitorItem, statusLine] {
             item.isEnabled = false
         }
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
@@ -263,6 +279,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(memoryItem)
         menu.addItem(memoryDesktopItem)
         menu.addItem(memoryCodeItem)
+        menu.addItem(.separator())
+        menu.addItem(otherHeaderItem)
+        menu.addItem(otherVSCodeItem)
+        menu.addItem(otherMonitorItem)
         menu.addItem(.separator())
         menu.addItem(statusLine)
         menu.addItem(NSMenuItem(title: tr("Oppdater nå", "Refresh now"), action: #selector(refreshNow), keyEquivalent: "r"))
@@ -370,7 +390,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateMemory() {
-        let (desktop, code) = claudeMemoryUsage()
+        let usage = memoryUsage()
+        let (desktop, code) = (usage.desktop, usage.code)
         let f = ByteCountFormatter()
         f.countStyle = .memory
         func procs(_ n: Int) -> String {
@@ -379,6 +400,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         memoryItem.title = tr("Minnebruk Claude: ", "Claude memory usage: ") + f.string(fromByteCount: Int64(desktop.bytes + code.bytes))
         memoryDesktopItem.title = "   " + tr("Claude-appen", "Claude app") + " (\(procs(desktop.count))): " + f.string(fromByteCount: Int64(desktop.bytes))
         memoryCodeItem.title = "   Claude Code (\(procs(code.count))): " + f.string(fromByteCount: Int64(code.bytes))
+        let vscode = usage.vscode
+        otherVSCodeItem.title = "   Visual Studio Code" + (vscode.count == 0
+            ? ": " + tr("kjører ikke", "not running")
+            : " (\(procs(vscode.count))): " + f.string(fromByteCount: Int64(vscode.bytes)))
+        otherMonitorItem.title = "   AI Monitor for Claude: " + f.string(fromByteCount: Int64(usage.monitor.bytes))
     }
 
     @objc private func didWake() {
