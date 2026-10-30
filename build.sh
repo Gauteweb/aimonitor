@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-VERSION="0.9"
+VERSION="1.0"
 NAME="AI Monitor for Claude"
 EXEC="AIMonitorForClaude"
 BUNDLE_ID="net.gauteweb.aimonitor"
