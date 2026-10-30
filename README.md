@@ -28,15 +28,45 @@ The menu is in Norwegian if Norwegian is the first preferred language in macOS, 
 
 - macOS 13 (Ventura) or later
 - [Claude Code](https://claude.com/claude-code) installed and logged in with a Claude account (Pro, Max, Team or Enterprise). The app reuses Claude Code's login, so there is no separate sign-in or API key.
-- Xcode Command Line Tools to build (`xcode-select --install`)
+- Xcode Command Line Tools, since the app is built from source (`xcode-select --install`)
 
-## Build and install
+## Install with Homebrew
 
 ```sh
+brew install gauteweb/tap/aimonitor
+open "$(brew --prefix aimonitor)/AI Monitor for Claude.app"
+```
+
+Homebrew downloads the source code from this repository and builds the app on your Mac. To start it automatically, choose **Launch at login** in the menu.
+
+To upgrade:
+
+```sh
+brew upgrade aimonitor
+pkill -x AIMonitorForClaude; open "$(brew --prefix aimonitor)/AI Monitor for Claude.app"
+```
+
+### Limitations of the Homebrew install
+
+The app is not signed with an Apple Developer ID or notarized by Apple. A downloaded app like that is blocked by Gatekeeper, so instead of shipping a ready-made app, the Homebrew formula builds it from source on your own Mac. Apps you build yourself are not blocked. This has some drawbacks:
+
+- **Xcode Command Line Tools are required**, and installing or upgrading compiles the app, which takes a little longer than a normal download.
+- **The app is not placed in Applications.** It lives in Homebrew's folder (`$(brew --prefix aimonitor)`), so it may not show up in Launchpad or Spotlight. Start it with the `open` command above.
+- **Launch at login must be turned on again after `brew upgrade`.** Each version is installed in a new folder, and the login item points to the old one. Turn **Launch at login** off and on again in the menu after upgrading.
+- **Upgrading does not restart the app.** The old version keeps running until you quit it and open the new one.
+- **`brew uninstall` does not remove settings or the login item.** See [Uninstall](#uninstall).
+
+A signed and notarized version distributed as a Homebrew cask, which installs into Applications like a normal app, may come later.
+
+## Build from source
+
+```sh
+git clone https://github.com/Gauteweb/aimonitor.git
+cd aimonitor
 ./build.sh
 ```
 
-The script compiles `Sources/main.swift`, creates `AI Monitor for Claude.app`, signs it ad hoc, installs it in `~/Applications`, stops any running copy and starts the new one.
+The script compiles `Sources/main.swift`, creates `AI Monitor for Claude.app`, signs it ad hoc, installs it in `~/Applications`, stops any running copy and starts the new one. With `./build.sh --build-only` it only builds the app in `build/`.
 
 To start it automatically, choose **Launch at login** in the menu.
 
@@ -72,23 +102,30 @@ The usage endpoint is rate limited and shared with Claude Code itself, so the ap
 
 ## Uninstall
 
+If **Launch at login** is enabled, turn it off in the menu first. Then:
+
 ```sh
 pkill -x AIMonitorForClaude
-rm -rf ~/Applications/"AI Monitor for Claude.app"
-defaults delete local.claudestatus
-```
 
-If **Launch at login** was enabled, turn it off in the menu first.
+# If installed with Homebrew
+brew uninstall aimonitor
+
+# If built from source
+rm -rf ~/Applications/"AI Monitor for Claude.app"
+
+# Remove settings and cached figures
+defaults delete net.gauteweb.aimonitor
+```
 
 ## Project structure
 
 ```
 Sources/main.swift   The whole app (AppKit, no dependencies)
-build.sh             Builds, signs, installs and launches the app
+build.sh             Builds, signs, installs and launches the app (--build-only: just builds)
 LICENSE              MIT license
 ```
 
-To change the version number, edit `CFBundleShortVersionString` in `build.sh`.
+To change the version number, edit `VERSION` in `build.sh`.
 
 ## License
 

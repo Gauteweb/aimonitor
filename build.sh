@@ -1,11 +1,16 @@
 #!/bin/zsh
-# Builds "AI Monitor for Claude.app" and installs it in ~/Applications.
+# Builds "AI Monitor for Claude.app" in build/, then installs it in
+# ~/Applications and launches it.
+# With --build-only it only builds (used by the Homebrew formula).
 set -euo pipefail
 cd "$(dirname "$0")"
 
+VERSION="0.9"
 NAME="AI Monitor for Claude"
 EXEC="AIMonitorForClaude"
+BUNDLE_ID="net.gauteweb.aimonitor"
 APP="build/$NAME.app"
+
 rm -rf build
 mkdir -p "$APP/Contents/MacOS"
 
@@ -17,12 +22,12 @@ cat > "$APP/Contents/Info.plist" <<EOF
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key><string>$EXEC</string>
-    <key>CFBundleIdentifier</key><string>local.claudestatus</string>
+    <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
     <key>CFBundleName</key><string>$NAME</string>
     <key>CFBundleDisplayName</key><string>$NAME</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.9</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleShortVersionString</key><string>$VERSION</string>
+    <key>CFBundleVersion</key><string>$VERSION</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><true/>
 </dict>
@@ -31,12 +36,14 @@ EOF
 
 codesign --force --sign - "$APP"
 
+if [[ "${1:-}" == "--build-only" ]]; then
+    echo "Built: $APP"
+    exit 0
+fi
+
 mkdir -p ~/Applications
 pkill -x "$EXEC" 2>/dev/null || true
-# Remove the build from before the rename.
-pkill -x ClaudeStatus 2>/dev/null || true
-rm -rf ~/Applications/ClaudeStatus.app
 rm -rf ~/Applications/"$NAME.app"
 cp -R "$APP" ~/Applications/
 open ~/Applications/"$NAME.app"
-echo "Installert og startet: ~/Applications/$NAME.app"
+echo "Installed and launched: ~/Applications/$NAME.app"
