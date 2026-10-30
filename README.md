@@ -20,6 +20,7 @@ Click the icon to open the menu:
 - **Current session** and **Weekly limit (all models)**, with the time each one resets
 - **Claude memory usage** – total memory used by the Claude desktop app (including its `Claude Helper` processes) and by Claude Code CLI sessions, measured the same way as the *Memory* column in Activity Monitor
 - **Other relevant processes** – memory used by Visual Studio Code (including its `Code Helper` processes) and by AI Monitor for Claude itself
+- **Claude CPU usage** – a graph of the last 5 minutes for the Claude desktop app, Claude Code and Visual Studio Code, with the current value of each. 100% is one full CPU core, as in Activity Monitor. It is sampled every 2 seconds and keeps updating while the menu is open
 - **Status line** – when the figures were last updated, or what went wrong
 - **Refresh now** (⌘R), **Open claude.ai/settings/usage**, **Launch at login** and **Quit** (⌘Q)
 
@@ -78,7 +79,7 @@ To start it automatically, choose **Launch at login** in the menu.
 | Usage percentages | `GET https://api.anthropic.com/api/oauth/usage` (`five_hour` and `seven_day`) |
 | Organization name | `GET https://api.anthropic.com/api/oauth/profile` |
 | License | `subscriptionType` and `rateLimitTier` in Claude Code's keychain item |
-| Memory | `proc_pid_rusage` (physical footprint) for processes in `Claude.app` and Claude Code processes |
+| Memory and CPU | `proc_pid_rusage` (physical footprint, and user + system CPU time) for processes in `Claude.app`, Claude Code processes and processes in `Visual Studio Code.app` |
 
 The access token is read from the `Claude Code-credentials` item in the login keychain via `/usr/bin/security`. It is only sent to `api.anthropic.com`, and never stored by this app.
 

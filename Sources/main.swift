@@ -175,24 +175,34 @@ func appIconMenuBarImage() -> NSImage {
     return img
 }
 
-// MARK: - Memory
+// MARK: - Processes
 
-struct MemoryGroup {
+struct ProcessGroup {
     var count = 0
     var bytes: UInt64 = 0
+    /// Total CPU time (user + system) so far, in nanoseconds, per process.
+    var cpuTimes: [pid_t: UInt64] = [:]
 }
 
-struct MemoryUsage {
-    var desktop = MemoryGroup()   // Claude desktop app and its helpers
-    var code = MemoryGroup()      // Claude Code CLI sessions
-    var vscode = MemoryGroup()    // Visual Studio Code and its helpers
-    var monitor = MemoryGroup()   // this app
+struct ProcessUsage {
+    var desktop = ProcessGroup()   // Claude desktop app and its helpers
+    var code = ProcessGroup()      // Claude Code CLI sessions
+    var vscode = ProcessGroup()    // Visual Studio Code and its helpers
+    var monitor = ProcessGroup()   // this app
 }
+
+/// `proc_pid_rusage` reports CPU time in Mach time units, which are only
+/// nanoseconds on Intel Macs.
+private let machTimebase: mach_timebase_info_data_t = {
+    var info = mach_timebase_info_data_t()
+    mach_timebase_info(&info)
+    return info
+}()
 
 /// Sums the memory footprint (same figure as Activity Monitor's "Memory" column)
-/// of Claude processes and of other relevant processes.
-func memoryUsage() -> MemoryUsage {
-    var usage = MemoryUsage()
+/// of Claude processes and of other relevant processes, and collects their CPU time.
+func processUsage() -> ProcessUsage {
+    var usage = ProcessUsage()
     let ownPid = getpid()
     let capacity = Int(proc_listallpids(nil, 0)) + 64
     var pids = [pid_t](repeating: 0, count: capacity)
@@ -206,7 +216,7 @@ func memoryUsage() -> MemoryUsage {
         // but the process name is "claude" since it is started via a symlink.
         var nameBuf = [CChar](repeating: 0, count: 256)
         proc_name(pid, &nameBuf, UInt32(nameBuf.count))
-        let group: WritableKeyPath<MemoryUsage, MemoryGroup>
+        let group: WritableKeyPath<ProcessUsage, ProcessGroup>
         if String(cString: nameBuf) == "claude" || path.contains("/claude/versions/") {
             group = \.code
         } else if path.contains("/Claude.app/") {
@@ -228,8 +238,129 @@ func memoryUsage() -> MemoryUsage {
         guard ok else { continue }
         usage[keyPath: group].count += 1
         usage[keyPath: group].bytes += info.ri_phys_footprint
+        let ticks = info.ri_user_time + info.ri_system_time
+        usage[keyPath: group].cpuTimes[pid] = ticks * UInt64(machTimebase.numer) / UInt64(machTimebase.denom)
     }
     return usage
+}
+
+// MARK: - CPU graph
+
+/// CPU usage over time per process group, in percent of one core (as in Activity Monitor).
+struct CPUHistory {
+    static let sampleInterval: TimeInterval = 2
+    static let capacity = 150   // 5 minutes
+
+    var desktop: [Double] = []
+    var code: [Double] = []
+    var vscode: [Double] = []
+    private var previous: ProcessUsage?
+    private var previousTime: UInt64 = 0
+
+    /// Adds a sample computed from the CPU time used since the previous one.
+    /// Processes that started in between count from zero; ones that exited are left out.
+    mutating func add(_ usage: ProcessUsage) {
+        let now = DispatchTime.now().uptimeNanoseconds
+        defer { previous = usage; previousTime = now }
+        guard let previous, now > previousTime else { return }
+        let elapsed = Double(now - previousTime)
+        func percent(_ group: KeyPath<ProcessUsage, ProcessGroup>) -> Double {
+            let before = previous[keyPath: group].cpuTimes
+            let used = usage[keyPath: group].cpuTimes.reduce(0.0) { sum, entry in
+                let start = before[entry.key] ?? 0
+                return sum + (entry.value > start ? Double(entry.value - start) : 0)
+            }
+            return used / elapsed * 100
+        }
+        func append(_ value: Double, to series: inout [Double]) {
+            series.append(value)
+            if series.count > Self.capacity { series.removeFirst(series.count - Self.capacity) }
+        }
+        append(percent(\.desktop), to: &desktop)
+        append(percent(\.code), to: &code)
+        append(percent(\.vscode), to: &vscode)
+    }
+}
+
+/// Line graph of `CPUHistory`, shown as a menu item view, with a legend below.
+/// `width` is the minimum; the view stretches to the width of the menu.
+final class CPUGraphView: NSView {
+    var history = CPUHistory() { didSet { needsDisplay = true } }
+
+    private let inset: CGFloat = 20
+    private let plotHeight: CGFloat = 64
+    private let legendHeight: CGFloat = 22
+
+    override var isFlipped: Bool { true }
+
+    init(width: CGFloat) {
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 4 + plotHeight + legendHeight + 2))
+        // Menus widen item views with a flexible width to the menu's width.
+        autoresizingMask = [.width]
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    private var series: [(name: String, values: [Double], color: NSColor)] {
+        [(tr("Claude-appen", "Claude app"), history.desktop, .systemOrange),
+         ("Claude Code", history.code, .systemPurple),
+         ("VS Code", history.vscode, .systemBlue)]
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let plot = NSRect(x: inset, y: 4, width: bounds.width - 2 * inset, height: plotHeight)
+        let smallFont = NSFont.monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize - 1, weight: .regular)
+
+        // Scale to the highest value shown, rounded up to a readable step.
+        let peak = series.flatMap(\.values).max() ?? 0
+        let top = [5.0, 10, 25, 50, 100, 200, 400, 800, 1600].first { $0 >= peak } ?? peak
+
+        NSColor.quaternaryLabelColor.setFill()
+        NSBezierPath(roundedRect: plot, xRadius: 4, yRadius: 4).fill()
+        let grid = NSBezierPath()
+        grid.move(to: NSPoint(x: plot.minX, y: plot.midY))
+        grid.line(to: NSPoint(x: plot.maxX, y: plot.midY))
+        grid.lineWidth = 0.5
+        grid.setLineDash([2, 2], count: 2, phase: 0)
+        NSColor.tertiaryLabelColor.setStroke()
+        grid.stroke()
+        NSAttributedString(string: "\(Int(top))%", attributes: [
+            .font: smallFont, .foregroundColor: NSColor.secondaryLabelColor,
+        ]).draw(at: NSPoint(x: plot.minX + 4, y: plot.minY + 2))
+
+        // Newest sample at the right edge.
+        let step = plot.width / CGFloat(CPUHistory.capacity - 1)
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(roundedRect: plot, xRadius: 4, yRadius: 4).addClip()
+        for s in series where s.values.count > 1 {
+            let path = NSBezierPath()
+            for (i, v) in s.values.enumerated() {
+                let x = plot.maxX - CGFloat(s.values.count - 1 - i) * step
+                let y = plot.maxY - 1 - CGFloat(v / top) * (plot.height - 2)
+                i == 0 ? path.move(to: NSPoint(x: x, y: y)) : path.line(to: NSPoint(x: x, y: y))
+            }
+            path.lineWidth = 1.5
+            path.lineJoinStyle = .round
+            s.color.setStroke()
+            path.stroke()
+        }
+        NSGraphicsContext.restoreGraphicsState()
+
+        // Legend with the latest value of each series.
+        var x = plot.minX
+        let y = plot.maxY + 5
+        for s in series {
+            s.color.setFill()
+            NSBezierPath(ovalIn: NSRect(x: x, y: y + 4, width: 7, height: 7)).fill()
+            x += 11
+            let latest = s.values.last.map { "\(Int($0.rounded()))%" } ?? "–"
+            let text = NSAttributedString(string: "\(s.name) \(latest)", attributes: [
+                .font: smallFont, .foregroundColor: NSColor.labelColor,
+            ])
+            text.draw(at: NSPoint(x: x, y: y))
+            x += text.size().width + 14
+        }
+    }
 }
 
 // MARK: - App
@@ -254,6 +385,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let otherHeaderItem = NSMenuItem(title: tr("Andre relevante prosesser", "Other relevant processes"), action: nil, keyEquivalent: "")
     private let otherVSCodeItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let otherMonitorItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let cpuItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let cpuGraphItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let cpuGraph = CPUGraphView(width: 300)
+    private var cpuTimer: Timer?
+    private var isMenuOpen = false
     private let statusLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let nextItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let loginItem = NSMenuItem(title: tr("Start ved innlogging", "Launch at login"), action: #selector(toggleLogin), keyEquivalent: "")
@@ -289,7 +425,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         for item in [planItem, orgItem, sessionItem, sessionResetItem, weeklyItem, weeklyResetItem,
                      memoryItem, memoryDesktopItem, memoryCodeItem,
-                     otherHeaderItem, otherVSCodeItem, otherMonitorItem, statusLine, nextItem] {
+                     otherHeaderItem, otherVSCodeItem, otherMonitorItem, cpuItem, statusLine, nextItem] {
             item.isEnabled = false
         }
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
@@ -325,6 +461,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(otherVSCodeItem)
         menu.addItem(otherMonitorItem)
         menu.addItem(.separator())
+        menu.addItem(cpuItem)
+        cpuGraphItem.view = cpuGraph
+        cpuGraphItem.isEnabled = false
+        menu.addItem(cpuGraphItem)
+        menu.addItem(.separator())
         menu.addItem(statusLine)
         menu.addItem(nextItem)
         menu.addItem(NSMenuItem(title: tr("Oppdater nå", "Refresh now"), action: #selector(refreshNow), keyEquivalent: "r"))
@@ -352,6 +493,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         interval = min(max(saved, minInterval), maxInterval)
         nextAllowedAt = defaults.object(forKey: nextAllowedKey) as? Date ?? .distantPast
         refresh()
+        startCPUSampling()
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
     }
@@ -368,7 +510,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Called after every text change, since setting `title` doesn't update the view.
     private func applyColors() {
         let font = NSFont.menuFont(ofSize: 0)
-        for item in menu.items where !item.isSeparatorItem {
+        for item in menu.items where !item.isSeparatorItem && item !== cpuGraphItem {
             if item.isEnabled {
                 item.attributedTitle = NSAttributedString(
                     string: item.title, attributes: [.font: font, .foregroundColor: NSColor.secondaryLabelColor])
@@ -397,6 +539,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
+        isMenuOpen = true
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
         updateStatusLine(error: nil)
         updateMemory()
@@ -405,6 +548,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         applyColors()
         refresh()
     }
+
+    func menuDidClose(_ menu: NSMenu) { isMenuOpen = false }
 
     @objc private func refreshNow() { refresh() }
 
@@ -429,8 +574,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// Samples CPU usage continuously, so the graph has history when the menu opens.
+    /// The timer also runs while the menu is open, which keeps the graph live.
+    private func startCPUSampling() {
+        sampleCPU()
+        let timer = Timer(timeInterval: CPUHistory.sampleInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.sampleCPU() }
+        }
+        timer.tolerance = 0.2
+        RunLoop.main.add(timer, forMode: .common)
+        cpuTimer = timer
+    }
+
+    private func sampleCPU() {
+        cpuGraph.history.add(processUsage())
+        let h = cpuGraph.history
+        let total = (h.desktop.last ?? 0) + (h.code.last ?? 0)
+        cpuItem.title = tr("CPU-bruk Claude: ", "Claude CPU usage: ") + "\(Int(total.rounded()))%"
+            + tr(" (siste 5 min)", " (last 5 min)")
+        if isMenuOpen { applyColors() }
+    }
+
     private func updateMemory() {
-        let usage = memoryUsage()
+        let usage = processUsage()
         let (desktop, code) = (usage.desktop, usage.code)
         let f = ByteCountFormatter()
         f.countStyle = .memory
