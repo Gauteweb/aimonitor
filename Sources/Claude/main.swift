@@ -155,6 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var isMenuOpen = false
     private let statusLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let nextItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let updateChecker = UpdateChecker(appName: "AI Monitor for Claude", tagPrefix: "v")
     private let loginItem = NSMenuItem(title: tr("Start ved innlogging", "Launch at login"), action: #selector(toggleLogin), keyEquivalent: "")
 
     private var last: UsageResponse?
@@ -193,6 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         let header = headerMenuItem(appName: "AI Monitor for Claude")
         menu.addItem(header)
+        menu.addItem(updateChecker.menuItem)
         menu.addItem(planItem)
         menu.addItem(orgItem)
         updatePlan()
@@ -245,6 +247,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         nextAllowedAt = defaults.object(forKey: nextAllowedKey) as? Date ?? .distantPast
         refresh()
         startCPUSampling()
+        updateChecker.start()
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
     }

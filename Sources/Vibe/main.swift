@@ -459,6 +459,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let nextItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let mistralLoginItem = NSMenuItem(title: tr("Logg inn på Mistral…", "Log in to Mistral…"), action: #selector(showLogin), keyEquivalent: "")
     private let mistralLogoutItem = NSMenuItem(title: tr("Logg ut av Mistral", "Log out of Mistral"), action: #selector(logOut), keyEquivalent: "")
+    private let updateChecker = UpdateChecker(appName: "AI Monitor for Mistral Vibe", tagPrefix: "mistral-vibe-v")
     private let loginItem = NSMenuItem(title: tr("Start ved innlogging", "Launch at login"), action: #selector(toggleLogin), keyEquivalent: "")
 
     private let reader = SubscriptionPageReader()
@@ -494,6 +495,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item.isEnabled = false
         }
         menu.addItem(headerMenuItem(appName: "AI Monitor for Mistral Vibe"))
+        menu.addItem(updateChecker.menuItem)
         menu.addItem(planItem)
         menu.addItem(.separator())
         menu.addItem(vibeItem)
@@ -551,6 +553,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         render()
         refresh()
         startCPUSampling()
+        updateChecker.start()
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
     }

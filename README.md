@@ -24,6 +24,7 @@ The first number is the **current session** (the 5-hour window) and the second i
 Click the icon to open the menu:
 
 - **App name and version**
+- **New version available** – shown when a newer release is out on GitHub, with a link to it. The app checks once a day and also shows an alert once for each new version
 - **License** – your plan, e.g. `Team · Max 5x`
 - **Organization** – the name of your Claude organization
 - **Current session** and **Weekly limit (all models)**, with the time each one resets
@@ -155,6 +156,7 @@ pkill -x AIMonitorForMistralVibe; open "$(brew --prefix aimonitor-mistral-vibe)/
 The menu bar shows how much of the **included Vibe Code usage** this month you have used, with the same colours as the Claude app. The menu shows:
 
 - **License** – your Mistral plan, e.g. `Team`
+- **New version available** – a link to a newer release on GitHub, as in the Claude app
 - **Vibe Code (included in plan)** and **API (included in plan)** – percentage and amount, e.g. `$10.07 of $600`, and the day both reset (the first day of each month)
 - **API requests, last 30 days** – a bar chart per day, split by usage type (Vibe Work, Vibe Code, Connectors, Completion, …) with the total for each, like the chart at admin.mistral.ai/organization/usage
 - **Vibe CLI memory usage**, **other relevant processes** and a **CPU graph** for Vibe CLI and Visual Studio Code, as in the Claude app
