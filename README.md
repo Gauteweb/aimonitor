@@ -2,8 +2,10 @@
 
 This repo contains various small menu bar utilities for monitoring your AI usage. Currently supporting the following AI vendors:
 
-- Claude
-- Mistral
+- [Claude](#ai-monitor-for-claude)
+- [Mistral](#ai-monitor-for-mistral-vibe)
+
+These monitor-utilities shows your token/API spend, local CPU and RAM usage.
 
 Currently there are separate utilities for each vendor, so make sure you install the utility for your AI vendor.
 
