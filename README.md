@@ -199,7 +199,7 @@ defaults delete net.gauteweb.aimonitor.vibe
 rm -rf ~/Library/WebKit/net.gauteweb.aimonitor.vibe   # the Mistral login
 ```
 
-### Project structure
+## Project structure
 
 ```
 Sources/Claude/          AI Monitor for Claude (AppKit, no dependencies)
