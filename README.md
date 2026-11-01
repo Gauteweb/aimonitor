@@ -9,6 +9,18 @@ These monitor-utilities shows your token/API spend, local CPU and RAM usage.
 
 Currently there are separate utilities for each vendor, so make sure you install the utility for your AI vendor.
 
+### Install AI Monitor with Homebrew
+
+```sh
+brew install gauteweb/tap/aimonitor
+open "$(brew --prefix aimonitor)/AI Monitor for Claude.app"
+```
+
+```sh
+brew install gauteweb/tap/aimonitor-mistral-vibe
+open "$(brew --prefix aimonitor-mistral-vibe)/AI Monitor for Mistral Vibe.app"
+```
+
 ## AI Monitor for Claude
 
 A small macOS menu bar app that shows how much of your Claude usage limits you have used.
@@ -21,7 +33,7 @@ The first number is the **current session** (the 5-hour window) and the second i
 
 > **Unofficial.** This project is not made by, affiliated with or endorsed by Anthropic. It relies on undocumented endpoints that may change or stop working at any time.
 
-## Features
+### Features
 
 Click the icon to open the menu:
 
@@ -38,13 +50,13 @@ Click the icon to open the menu:
 
 The menu is in Norwegian if Norwegian is the first preferred language in macOS, and in English otherwise.
 
-## Requirements
+### Requirements
 
 - macOS 13 (Ventura) or later
 - [Claude Code](https://claude.com/claude-code) installed and logged in with a Claude account (Pro, Max, Team or Enterprise). The app reuses Claude Code's login, so there is no separate sign-in or API key.
 - Xcode Command Line Tools, since the app is built from source (`xcode-select --install`)
 
-## Install with Homebrew
+### Install with Homebrew
 
 ```sh
 brew install gauteweb/tap/aimonitor
@@ -60,7 +72,7 @@ brew upgrade aimonitor
 pkill -x AIMonitorForClaude; open "$(brew --prefix aimonitor)/AI Monitor for Claude.app"
 ```
 
-### Limitations of the Homebrew install
+#### Limitations of the Homebrew install
 
 The app is not signed with an Apple Developer ID or notarized by Apple. A downloaded app like that is blocked by Gatekeeper, so instead of shipping a ready-made app, the Homebrew formula builds it from source on your own Mac. Apps you build yourself are not blocked. This has some drawbacks:
 
@@ -72,7 +84,7 @@ The app is not signed with an Apple Developer ID or notarized by Apple. A downlo
 
 A signed and notarized version distributed as a Homebrew cask, which installs into Applications like a normal app, may come later.
 
-## Build from source
+### Build from source
 
 ```sh
 git clone https://github.com/Gauteweb/aimonitor.git
@@ -84,7 +96,7 @@ The script compiles `Sources/Claude/` and `Sources/Shared/`, creates `AI Monitor
 
 To start it automatically, choose **Launch at login** in the menu.
 
-## How it works
+### How it works
 
 | What | Source |
 |---|---|
@@ -95,7 +107,7 @@ To start it automatically, choose **Launch at login** in the menu.
 
 The access token is read from the `Claude Code-credentials` item in the login keychain via `/usr/bin/security`. It is only sent to `api.anthropic.com`, and never stored by this app.
 
-### Refresh and rate limits
+#### Refresh and rate limits
 
 The usage endpoint is rate limited and shared with Claude Code itself, so the app is deliberately cautious:
 
@@ -106,7 +118,7 @@ The usage endpoint is rate limited and shared with Claude Code itself, so the ap
 - The last response, the interval and the time of the next allowed request are saved, so restarts and upgrades show figures immediately and do not cause extra requests.
 - The organization name is fetched at most once a day.
 
-## Troubleshooting
+### Troubleshooting
 
 | Message | Meaning |
 |---|---|
@@ -116,7 +128,7 @@ The usage endpoint is rate limited and shared with Claude Code itself, so the ap
 | Token expired – open Claude Code to renew it | The app does not renew the login itself, since that could log you out of Claude Code. Using Claude Code renews it. |
 | Too many requests (HTTP 429) | Rate limited. The app retries automatically at the time shown. |
 
-## Uninstall
+### Uninstall
 
 If **Launch at login** is enabled, turn it off in the menu first. Then:
 
@@ -187,7 +199,7 @@ defaults delete net.gauteweb.aimonitor.vibe
 rm -rf ~/Library/WebKit/net.gauteweb.aimonitor.vibe   # the Mistral login
 ```
 
-## Project structure
+### Project structure
 
 ```
 Sources/Claude/          AI Monitor for Claude (AppKit, no dependencies)
@@ -199,7 +211,7 @@ LICENSE                  MIT license
 .github/workflows/       Release workflow
 ```
 
-## Releasing a new version
+### Releasing a new version
 
 1. Set `VERSION` in `build.sh`, for example `VERSION="1.0"`, and commit.
 2. Tag and push:
@@ -214,7 +226,7 @@ The workflow needs the repository secret `HOMEBREW_TAP_DEPLOY_KEY`: the private 
 
 AI Monitor for Mistral Vibe is released the same way, with `VIBE_VERSION` in `build.sh` and tags of the form `mistral-vibe-v1.0`. The workflow then updates `Formula/aimonitor-mistral-vibe.rb` instead, and leaves AI Monitor for Claude as the repository's latest release.
 
-## License
+### License
 
 [MIT](LICENSE) © 2026 Gaute Holmin
 
