@@ -168,10 +168,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // interval (up to `maxInterval`); after `successesBeforeDecrease` successful
     // requests in a row it is halved again, but never below `minInterval`.
     // Both the interval and the time of the next allowed request survive restarts.
-    private let minInterval: TimeInterval = 300
+    private let minInterval: TimeInterval = 600
     private let maxInterval: TimeInterval = 3600
     private let successesBeforeDecrease = 6
-    private var interval: TimeInterval = 300
+    private var interval: TimeInterval = 600
+    /// After launch and wake, Claude Code and the network are starting up too, so the
+    /// first request waits this long instead of competing with them.
+    private let startupDelay: TimeInterval = 90
+    /// A 429 only marks the figures as stale (⚠︎) once they are older than this.
+    private let staleAfter: TimeInterval = 3600
     private var successStreak = 0
     /// No request is sent before this time.
     private var nextAllowedAt = Date.distantPast
@@ -245,6 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let saved = defaults.double(forKey: intervalKey)
         interval = min(max(saved, minInterval), maxInterval)
         nextAllowedAt = defaults.object(forKey: nextAllowedKey) as? Date ?? .distantPast
+        postponeForStartup()
         refresh()
         startCPUSampling()
         updateChecker.start()
@@ -334,7 +340,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         otherMonitorItem.title = "   AI Monitor for Claude: " + f.string(fromByteCount: Int64(usage[.monitor].bytes))
     }
 
-    @objc private func didWake() { refresh() }
+    @objc private func didWake() {
+        postponeForStartup()
+        refresh()
+    }
+
+    /// Makes sure no request is sent until `startupDelay` has passed.
+    private func postponeForStartup() {
+        let earliest = Date().addingTimeInterval(startupDelay)
+        if nextAllowedAt < earliest { setNextAllowed(earliest) }
+    }
 
     private func scheduleNext(after delay: TimeInterval) {
         timer?.invalidate()
@@ -382,7 +397,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
                 self.render(error: nil)
             } catch FetchError.rateLimited(let retryAfter) {
-                // 5 → 10 → 20 → 40 → 60 min, or longer if the server asks for it.
+                // 10 → 20 → 40 → 60 min, or longer if the server asks for it.
                 self.successStreak = 0
                 self.setInterval(self.interval * 2)
                 self.setNextAllowed(now.addingTimeInterval(max(self.interval, retryAfter ?? 0)))
@@ -415,7 +430,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 button.title = error == nil ? " …" : " " + tr("vent litt", "waiting")
                 button.attributedTitle = NSAttributedString(string: button.title)
             } else {
-                button.attributedTitle = titleString(session: session, weekly: weekly, stale: error != nil)
+                button.attributedTitle = titleString(session: session, weekly: weekly, stale: isStale(error))
             }
             button.toolTip = "\(sessionLabel) · \(weeklyLabel)"
         }
@@ -428,6 +443,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private var lastError: Error?
+
+    /// A 429 alone is not worth a warning while the cached figures are recent;
+    /// the menu still says it is rate limited. Other errors always show ⚠︎.
+    private func isStale(_ error: Error?) -> Bool {
+        guard let error else { return false }
+        if case FetchError.rateLimited = error, let t = lastUpdated,
+           Date().timeIntervalSince(t) < staleAfter { return false }
+        return true
+    }
 
     private func updateStatusLine(error: Error?) {
         if let err = lastError {

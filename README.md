@@ -99,9 +99,10 @@ The access token is read from the `Claude Code-credentials` item in the login ke
 
 The usage endpoint is rate limited and shared with Claude Code itself, so the app is deliberately cautious:
 
-- Usage is refreshed every **5 minutes**, and never more often. This minimum applies to every request: the timer, opening the menu, **Refresh now**, waking the Mac and restarting the app.
-- On **HTTP 429** the interval is doubled: 10, 20, 40 and at most 60 minutes. It keeps showing the last figures with a ⚠︎ in the meantime.
-- The raised interval stays in place, and is halved again after 6 successful refreshes in a row, but never below 5 minutes.
+- Usage is refreshed every **10 minutes**, and never more often. This minimum applies to every request: the timer, opening the menu, **Refresh now**, waking the Mac and restarting the app.
+- After the app starts or the Mac wakes, the first request waits 90 seconds, so it does not compete with Claude Code and the network starting up.
+- On **HTTP 429** the interval is doubled: 20, 40 and at most 60 minutes. It keeps showing the last figures in the meantime, with a ⚠︎ only once they are more than an hour old.
+- The raised interval stays in place, and is halved again after 6 successful refreshes in a row, but never below 10 minutes.
 - The menu shows when the next refresh will happen and the current interval.
 - The last response, the interval and the time of the next allowed request are saved, so restarts and upgrades show figures immediately and do not cause extra requests.
 - The organization name is fetched at most once a day.
