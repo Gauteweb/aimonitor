@@ -48,8 +48,16 @@ func readCredentials() throws -> [String: Any] {
 }
 
 func readAccessToken() throws -> String {
-    guard let token = try readCredentials()["accessToken"] as? String else { throw FetchError.noCredentials }
-    return token
+    try readToken().value
+}
+
+/// The access token and, if Claude Code stored it, when it expires.
+func readToken() throws -> (value: String, expiresAt: Date?) {
+    let creds = try readCredentials()
+    guard let token = creds["accessToken"] as? String else { throw FetchError.noCredentials }
+    // expiresAt is milliseconds since 1970.
+    let expires = (creds["expiresAt"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) }
+    return (token, expires)
 }
 
 /// Human-readable plan, e.g. "Team · Max 5x", from the keychain credentials.
@@ -85,8 +93,7 @@ func fetchOrganizationName() async throws -> String? {
 }
 
 /// Returns the raw JSON so the caller can cache it between launches.
-func fetchUsage() async throws -> Data {
-    let token = try readAccessToken()
+func fetchUsage(token: String) async throws -> Data {
     var req = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
     req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
@@ -372,7 +379,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func refresh() {
         if isFetching { return }
         let now = Date()
-        if now < nextAllowedAt {
+
+        // Reading the keychain is local and free, so it is done before the rate limit
+        // check. A missing or rejected token is checked again every `tokenCheckInterval`,
+        // and a new token (Claude Code renewed it, e.g. after an update) is tried at once.
+        let token: String
+        do {
+            let t = try readToken()
+            token = t.value
+            if let exp = t.expiresAt, exp <= now {
+                rejectedToken = token
+            }
+        } catch {
+            lastError = FetchError.noCredentials
+            render(error: lastError)
+            scheduleNext(after: tokenCheckInterval)
+            return
+        }
+        if token == rejectedToken {
+            lastError = FetchError.unauthorized
+            render(error: lastError)
+            scheduleNext(after: tokenCheckInterval)
+            return
+        }
+        let isNewToken = rejectedToken != nil || lastErrorIsCredentials
+        rejectedToken = nil
+
+        if now < nextAllowedAt && !isNewToken {
             scheduleNext(after: nextAllowedAt.timeIntervalSince(now))
             updateStatusLine(error: nil)
             return
@@ -383,7 +416,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Task {
             defer { self.isFetching = false }
             do {
-                let data = try await fetchUsage()
+                let data = try await fetchUsage(token: token)
                 let usage = try JSONDecoder().decode(UsageResponse.self, from: data)
                 self.last = usage
                 self.lastUpdated = Date()
@@ -403,6 +436,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.setNextAllowed(now.addingTimeInterval(max(self.interval, retryAfter ?? 0)))
                 self.lastError = FetchError.rateLimited(retryAfter: retryAfter)
                 self.render(error: self.lastError)
+            } catch FetchError.unauthorized {
+                // Wait for Claude Code to store a new token instead of the full interval.
+                self.rejectedToken = token
+                self.lastError = FetchError.unauthorized
+                self.render(error: self.lastError)
+                self.scheduleNext(after: self.tokenCheckInterval)
+                return
             } catch {
                 self.lastError = error
                 self.render(error: error)
@@ -443,6 +483,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private var lastError: Error?
+    /// The token the API rejected (or that had expired). It is not sent again; the
+    /// keychain is checked every `tokenCheckInterval` until Claude Code stores a new one.
+    private var rejectedToken: String?
+    private let tokenCheckInterval: TimeInterval = 30
+
+    private var lastErrorIsCredentials: Bool {
+        if case FetchError.noCredentials? = lastError as? FetchError { return true }
+        return false
+    }
 
     /// A 429 alone is not worth a warning while the cached figures are recent;
     /// the menu still says it is rate limited. Other errors always show ⚠︎.
@@ -460,8 +509,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 statusLine.title = tr("Fant ikke Claude Code-innlogging (kjør `claude` og logg inn)",
                                       "Claude Code login not found (run `claude` and log in)")
             case FetchError.unauthorized:
-                statusLine.title = tr("Token utløpt – åpne Claude Code for å fornye",
-                                      "Token expired – open Claude Code to renew it")
+                statusLine.title = tr("Token utløpt – åpne Claude Code for å fornye (oppdateres automatisk)",
+                                      "Token expired – open Claude Code to renew it (updates automatically)")
             case FetchError.rateLimited:
                 let at = clockTime(nextAllowedAt)
                 statusLine.title = tr("For mange forespørsler (HTTP 429) – prøver igjen kl. \(at)",

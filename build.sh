@@ -11,7 +11,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # AI Monitor for Claude. The release workflow checks this against the tag.
-VERSION="1.2.1"
+VERSION="1.2.2"
 # AI Monitor for Mistral Vibe
 VIBE_VERSION="1.2"
 

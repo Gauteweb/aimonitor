@@ -126,7 +126,7 @@ The usage endpoint is rate limited and shared with Claude Code itself, so the ap
 | `waiting` in the menu bar | No figures yet and the last attempt failed. See the status line in the menu. |
 | ⚠︎ after the figures | The figures are from an earlier successful refresh. The latest attempt failed. |
 | Claude Code login not found | Run `claude` and log in. |
-| Token expired – open Claude Code to renew it | The app does not renew the login itself, since that could log you out of Claude Code. Using Claude Code renews it. |
+| Token expired – open Claude Code to renew it | The app does not renew the login itself, since that could log you out of Claude Code. Using Claude Code renews it, and the app picks up the new token within 30 seconds, without a restart. |
 | Too many requests (HTTP 429) | Rate limited. The app retries automatically at the time shown. |
 
 ### Uninstall
