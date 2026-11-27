@@ -14,9 +14,46 @@ struct UsageWindow: Decodable {
     }
 }
 
+/// A weekly limit that applies to a single model (e.g. Fable), from the `limits` list.
+struct ScopedLimit {
+    let name: String
+    let window: UsageWindow
+}
+
 struct UsageResponse: Decodable {
     let five_hour: UsageWindow?
     let seven_day: UsageWindow?
+    /// Model-specific weekly limits, as on claude.ai/settings/usage.
+    let weeklyScoped: [ScopedLimit]
+
+    private enum CodingKeys: String, CodingKey { case five_hour, seven_day, limits }
+
+    private struct Limit: Decodable {
+        struct Named: Decodable { let display_name: String? }
+        struct Scope: Decodable { let model: Named? }
+        let kind: String?
+        let percent: Double?
+        let resets_at: String?
+        let scope: Scope?
+    }
+
+    /// Decodes each element on its own, so one unexpected entry doesn't hide the rest.
+    private struct Lossy<T: Decodable>: Decodable {
+        let value: T?
+        init(from decoder: Decoder) throws { value = try? T(from: decoder) }
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        five_hour = try? c.decodeIfPresent(UsageWindow.self, forKey: .five_hour)
+        seven_day = try? c.decodeIfPresent(UsageWindow.self, forKey: .seven_day)
+        let limits = (try? c.decodeIfPresent([Lossy<Limit>].self, forKey: .limits)) ?? nil
+        weeklyScoped = (limits ?? []).compactMap(\.value).compactMap { l in
+            guard l.kind == "weekly_scoped",
+                  let name = l.scope?.model?.display_name, !name.isEmpty else { return nil }
+            return ScopedLimit(name: name, window: UsageWindow(utilization: l.percent, resets_at: l.resets_at))
+        }
+    }
 }
 
 enum FetchError: Error {
@@ -144,6 +181,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let sessionResetItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let weeklyItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let weeklyResetItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    /// Two items (usage and reset time) per model-specific weekly limit, below the weekly limit.
+    private var scopedItems: [NSMenuItem] = []
     private let planItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let orgItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let orgKey = "organizationName"
@@ -479,7 +518,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sessionResetItem.title = resetText(last?.five_hour?.resetDate)
         weeklyItem.title = "\(weeklyLabel): \(pct(weekly))"
         weeklyResetItem.title = resetText(last?.seven_day?.resetDate)
+        renderScopedLimits()
         updateStatusLine(error: error)
+    }
+
+    /// Shows each model-specific weekly limit (e.g. Fable) right after the weekly limit.
+    private func renderScopedLimits() {
+        for item in scopedItems { menu.removeItem(item) }
+        scopedItems = []
+        var index = menu.index(of: weeklyResetItem) + 1
+        for limit in last?.weeklyScoped ?? [] {
+            let usage = NSMenuItem(title: tr("Ukegrense (\(limit.name))", "Weekly limit (\(limit.name))")
+                                   + ": \(pct(limit.window.utilization))", action: nil, keyEquivalent: "")
+            let reset = NSMenuItem(title: resetText(limit.window.resetDate), action: nil, keyEquivalent: "")
+            for item in [usage, reset] {
+                item.isEnabled = false
+                menu.insertItem(item, at: index)
+                index += 1
+                scopedItems.append(item)
+            }
+        }
     }
 
     private var lastError: Error?

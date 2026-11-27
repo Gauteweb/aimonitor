@@ -42,6 +42,7 @@ Click the icon to open the menu:
 - **License** – your plan, e.g. `Team · Max 5x`
 - **Organization** – the name of your Claude organization
 - **Current session** and **Weekly limit (all models)**, with the time each one resets
+- **Model-specific weekly limits**, such as **Weekly limit (Fable)**, with the time each one resets – shown when your plan has one, as on claude.ai/settings/usage
 - **Claude memory usage** – total memory used by the Claude desktop app (including its `Claude Helper` processes) and by Claude Code CLI sessions, measured the same way as the *Memory* column in Activity Monitor
 - **Other relevant processes** – memory used by Visual Studio Code (including its `Code Helper` processes) and by AI Monitor for Claude itself
 - **Claude CPU usage** – a graph of the last 5 minutes for the Claude desktop app, Claude Code and Visual Studio Code, with the current value of each. 100% is one full CPU core, as in Activity Monitor. It is sampled every 2 seconds and keeps updating while the menu is open
