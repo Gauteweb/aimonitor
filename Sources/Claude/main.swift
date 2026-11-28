@@ -169,6 +169,105 @@ func claudeProcessUsage() -> ProcessUsage<ProcessKind> {
     }
 }
 
+/// A running Claude Code session and the project folder it was started in.
+struct CodeSession {
+    let folder: String
+    let started: Date?
+    let bytes: UInt64?
+}
+
+/// Running Claude Code sessions, oldest first. Helper processes that are not a
+/// session, such as the Chrome extension's native host, are left out.
+func claudeCodeSessions() -> [CodeSession] {
+    runningProcesses()
+        .filter { $0.name == "claude" || $0.path.contains("/claude/versions/") }
+        .filter { !$0.arguments().contains("--chrome-native-host") }
+        .compactMap { p in
+            guard let folder = p.workingDirectory() else { return nil }
+            return CodeSession(folder: folder, started: p.startTime(), bytes: p.memoryFootprint())
+        }
+        .sorted { ($0.started ?? .distantPast) < ($1.started ?? .distantPast) }
+}
+
+struct GitCommit {
+    let subject: String
+    let date: Date
+}
+
+/// The git to run, or nil if none is installed. /usr/bin/git is only a stub that
+/// asks to install the developer tools when they are missing, so it is used only
+/// when `xcode-select` points at an installed toolchain.
+let gitPath: String? = {
+    let fm = FileManager.default
+    for path in ["/opt/homebrew/bin/git", "/usr/local/bin/git"] where fm.isExecutableFile(atPath: path) {
+        return path
+    }
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/xcode-select")
+    p.arguments = ["-p"]
+    let out = Pipe()
+    p.standardOutput = out
+    p.standardError = Pipe()
+    guard (try? p.run()) != nil else { return nil }
+    p.waitUntilExit()
+    let dir = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard p.terminationStatus == 0, fm.isExecutableFile(atPath: dir + "/usr/bin/git") else { return nil }
+    return "/usr/bin/git"
+}()
+
+/// True if `folder` is inside a git repository (a `.git` in it or a parent folder).
+func isInGitRepository(_ folder: String) -> Bool {
+    var url = URL(fileURLWithPath: folder)
+    while true {
+        if FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path) { return true }
+        let parent = url.deletingLastPathComponent()
+        if parent.path == url.path { return false }
+        url = parent
+    }
+}
+
+/// The latest commit on the current branch of the repository `folder` is in.
+func lastCommit(in folder: String) -> GitCommit? {
+    guard let git = gitPath, isInGitRepository(folder) else { return nil }
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: git)
+    p.arguments = ["-C", folder, "log", "-1", "--format=%ct%x00%s"]
+    // Only reading, so don't take the index lock a running git might need.
+    p.environment = ["GIT_OPTIONAL_LOCKS": "0", "HOME": NSHomeDirectory()]
+    let out = Pipe()
+    p.standardOutput = out
+    p.standardError = Pipe()
+    guard (try? p.run()) != nil else { return nil }
+    let data = out.fileHandleForReading.readDataToEndOfFile()
+    p.waitUntilExit()
+    guard p.terminationStatus == 0 else { return nil }
+    let parts = String(decoding: data, as: UTF8.self)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .split(separator: "\0", maxSplits: 1)
+    guard parts.count == 2, let time = TimeInterval(parts[0]) else { return nil }
+    return GitCommit(subject: String(parts[1]), date: Date(timeIntervalSince1970: time))
+}
+
+/// "aimonitor" for ~/Code/aimonitor, and "~" for the home folder itself.
+func projectName(_ folder: String) -> String {
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
+    if folder == home { return "~" }
+    return (folder as NSString).lastPathComponent
+}
+
+/// How long ago `start` was, e.g. "2 t 5 min" / "2 hr, 5 min".
+func runningTime(since start: Date) -> String {
+    let f = DateComponentsFormatter()
+    var cal = Calendar.current
+    cal.locale = appLocale
+    f.calendar = cal
+    f.unitsStyle = .abbreviated
+    f.maximumUnitCount = 2
+    f.allowedUnits = [.day, .hour, .minute]
+    return f.string(from: max(Date().timeIntervalSince(start), 60)) ?? ""
+}
+
 // MARK: - App
 
 @MainActor
@@ -190,6 +289,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let memoryItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let memoryDesktopItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let memoryCodeItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let sessionsHeaderItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    /// One item per running Claude Code session, below `sessionsHeaderItem`.
+    private var sessionItems: [NSMenuItem] = []
     private let otherHeaderItem = NSMenuItem(title: tr("Andre relevante prosesser", "Other relevant processes"), action: nil, keyEquivalent: "")
     private let otherVSCodeItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let otherMonitorItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -239,7 +341,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         for item in [planItem, orgItem, sessionItem, sessionResetItem, weeklyItem, weeklyResetItem,
-                     memoryItem, memoryDesktopItem, memoryCodeItem,
+                     memoryItem, memoryDesktopItem, memoryCodeItem, sessionsHeaderItem,
                      otherHeaderItem, otherVSCodeItem, otherMonitorItem, cpuItem, statusLine, nextItem] {
             item.isEnabled = false
         }
@@ -260,6 +362,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(memoryItem)
         menu.addItem(memoryDesktopItem)
         menu.addItem(memoryCodeItem)
+        menu.addItem(.separator())
+        menu.addItem(sessionsHeaderItem)
+        updateSessions()
         menu.addItem(.separator())
         menu.addItem(otherHeaderItem)
         menu.addItem(otherVSCodeItem)
@@ -311,6 +416,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         loginItem.state = launchAtLoginState
         updateStatusLine(error: nil)
         updateMemory()
+        updateSessions()
         updatePlan()
         refreshOrganization()
         applyColors()
@@ -384,6 +490,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ? ": " + tr("kjører ikke", "not running")
             : " (\(procs(vscode.count))): " + f.string(fromByteCount: Int64(vscode.bytes)))
         otherMonitorItem.title = "   AI Monitor for Claude: " + f.string(fromByteCount: Int64(usage[.monitor].bytes))
+    }
+
+    /// Lists each running Claude Code session with its project folder, running time and memory.
+    private func updateSessions() {
+        let sessions = claudeCodeSessions()
+        sessionsHeaderItem.title = tr("Claude Code-økter", "Claude Code sessions") + ": \(sessions.count)"
+        for item in sessionItems { menu.removeItem(item) }
+        sessionItems = []
+        let f = ByteCountFormatter()
+        f.countStyle = .memory
+        let relative = RelativeDateTimeFormatter()
+        relative.locale = appLocale
+        // One git call per folder, even if several sessions run in the same project.
+        var commits: [String: GitCommit?] = [:]
+        for s in sessions where !commits.keys.contains(s.folder) {
+            commits.updateValue(lastCommit(in: s.folder), forKey: s.folder)
+        }
+        var index = menu.index(of: sessionsHeaderItem) + 1
+        for s in sessions {
+            var parts = [projectName(s.folder)]
+            if let started = s.started { parts.append(runningTime(since: started)) }
+            if let bytes = s.bytes { parts.append(f.string(fromByteCount: Int64(bytes))) }
+            var titles = ["   " + parts.joined(separator: " · ")]
+            if let commit = commits[s.folder] ?? nil {
+                var subject = commit.subject
+                if subject.count > 60 { subject = subject.prefix(59) + "…" }
+                titles.append("      " + subject + " · " + relative.localizedString(for: commit.date, relativeTo: Date()))
+            }
+            for title in titles {
+                let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                menu.insertItem(item, at: index)
+                index += 1
+                sessionItems.append(item)
+            }
+        }
     }
 
     @objc private func didWake() {
